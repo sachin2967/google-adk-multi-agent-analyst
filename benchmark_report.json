@@ -1,0 +1,18 @@
+{
+  "benchmark_queries_count": 30,
+  "single_agent_baseline": {
+    "success_rate": 40.0,
+    "successful_queries": 12,
+    "mean_latency_ms": 1.35,
+    "verification_layer": "None (Blind Execution)",
+    "error_recovery": "None (Fail-stop)"
+  },
+  "google_adk_multi_agent": {
+    "success_rate": 100.0,
+    "successful_queries": 30,
+    "mean_latency_ms": 9.33,
+    "verification_layer": "VerifierAgent Active (AST + Schema Checked)",
+    "error_recovery_rate": 0.0
+  },
+  "relative_accuracy_gain": "+150.0%"
+}
