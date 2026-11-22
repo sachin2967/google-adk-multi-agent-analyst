@@ -1,114 +1,105 @@
-# 🤖 Google ADK Enterprise Multi-Agent Analytical System
+# Local Commerce Analyst with Google ADK and MCP
 
-An enterprise-grade autonomous analytical agent platform built with **Google Agent Development Kit (ADK 2.0)** concepts, **Model Context Protocol (MCP)** tool interfaces, and an **AST-parsed execution sandbox** for zero-trust data operations.
+A local-first, tool-using commerce analytics demo. A Google ADK sequential workflow runs a planner, an MCP-backed analytics executor, and a verifier. The executor connects over MCP stdio to a separate Python process. The server exposes only parameterized, read-only aggregate tools over a seeded SQLite fixture; it never accepts caller-supplied SQL or Python source.
 
-Evaluated on a **30-question golden analytical benchmark** across relational transactional databases, demonstrating a **+150% accuracy gain** over traditional single-agent ReAct baselines.
+## What is implemented
 
----
+- **Google ADK runtime:** a real `SequentialAgent` with three `LlmAgent` steps (`analytics_planner`, `mcp_analytics_executor`, `analytics_verifier`).
+- **MCP:** a real stdio MCP server and client, with tool discovery and tool calls tested using the official MCP Python SDK.
+- **Constrained data access:** two tools, schema metadata and a fixed set of commerce metrics. Metric/group/filter values are validated; SQL query structure is application-authored and filter values use bound parameters.
+- **API and UI:** FastAPI exposes health, schema, deterministic metric, and configured-agent endpoints. Streamlit is a separate API client.
+- **Local model support:** LiteLLM through ADK can route to an Ollama model. There is no API key requirement for a local Ollama instance. No model is bundled or downloaded automatically.
+- **Seeded test data:** `data/create_db.py` generates the synthetic fixture. Native Python integer values are bound to SQLite to avoid NumPy scalar adaptation as binary blobs.
 
-## 📌 1. Business Problem & Motivation
+## Setup
 
-Enterprise business analysts, merchant operations leads, and category managers frequently need multi-step quantitative answers across relational datasets (revenue breakdowns, period-over-period growth, review sentiment correlations, cohort retention).
+Python 3.11 is supported. Create the fixture and install the project dependencies:
 
-- **The Problem:** Non-technical stakeholders must either wait days for data engineering query tickets, or rely on fragile single-prompt Text-to-SQL tools. Standard LLM ReAct loops regularly hallucinate schema columns, lack mathematical verification, and fail to self-correct when SQL joins return empty sets.
-- **The Solution:** A hierarchical multi-agent system orchestrating specialized **Coordinator, Planner, Tool Executor, and Verifier** agents. Implements automated error recovery loops, Model Context Protocol (MCP) tool standards, and zero-trust AST sandboxing.
-
----
-
-## 🏛️ 2. Hierarchical Agent Architecture
-
-```mermaid
-flowchart TD
-    UserQuery["Analytical Natural Language Query"] --> Coordinator["Coordinator Agent<br/>(Session Management & Context Router)"]
-    
-    subgraph ADK_Engine ["Google Agent Development Kit (ADK) Hierarchical Workflow Runtime"]
-        Coordinator --> Planner["Planner Agent<br/>(Sub-Task DAG Decomposition)"]
-        Planner --> Executor["Tool Executor Agent<br/>(MCP Standardized Interfaces)"]
-        Executor --> Verifier["Verifier Agent<br/>(Schema & Plausibility Verification)"]
-        Verifier -->|"Validation Error / Empty Set (Bounded Retries)"| Planner
-    end
-
-    subgraph Tool_Ecosystem ["Model Context Protocol (MCP) & Sandbox Layer"]
-        Executor --> MCP_Schema["inspect_database_schema<br/>(Table definitions & Foreign Keys)"]
-        Executor --> MCP_SQL["execute_safe_sql<br/>(Read-only SELECT enforcement)"]
-        Executor --> MCP_Sandbox["execute_sandboxed_pandas<br/>(AST Zero-Trust Python Sandbox)"]
-    end
-
-    Verifier -->|"Verified Result"| Response["Synthesized Executive Summary + Chart + Full Execution Trace"]
-```
-
----
-
-## 🛡️ 3. Zero-Trust AST Execution Sandboxing
-
-Unlike standard agent implementations that run unconstrained `eval()` or `exec()`:
-1. **Abstract Syntax Tree (AST) Inspection:** Every generated Python snippet is parsed into an AST tree via `SafeASTVisitor` prior to execution.
-2. **Strict Module Whitelist:** Only authorized numeric libraries (`numpy`, `pandas`, `math`, `matplotlib`) are accessible.
-3. **Hard System Ban:** Code attempting to import `os`, `sys`, `subprocess`, `socket`, `shutil`, `pickle`, or invoke `open()`, `eval()`, or `__import__()` is blocked before bytecode compilation and raises an immediate `SecurityViolation`.
-
----
-
-## 📊 4. 30-Question Golden Evaluation Benchmark
-
-The system was evaluated against a frozen judgment set of **30 multi-hop analytical questions** (categorized into revenue aggregations, logistics SLAs, customer reviews, period-over-period growth, and adversarial/edge queries):
-
-| Evaluation Metric | Single-Agent Baseline (Direct ReAct) | Google ADK Multi-Agent System | Differentiating Advantage |
-| :--- | :---: | :---: | :--- |
-| **Task Completion Accuracy** | 40.0% (12 / 30) | **100.0% (30 / 30)** | **+150.0% Relative Accuracy Gain** |
-| **Verification Layer** | None (Blind execution of raw output) | **Active (AST + Data Plausibility)** | Catches zero-row joins & null proliferation |
-| **Error Recovery Mechanism** | None (Fail-stop on first syntax error) | **Automated DAG Replanning Loop** | Bounded self-correction retries |
-| **Tool Protocol** | Ad-hoc internal functions | **Model Context Protocol (MCP)** | Standardized enterprise tool signatures |
-| **Mean Execution Latency** | 1.35 ms | **9.33 ms** | Minimal overhead for full multi-agent cycle |
-
----
-
-## 🚀 5. How to Run Locally
-
-### 1. Set Up Environment
-```bash
+```powershell
 python -m venv .venv
-.venv\Scripts\activate  # Linux: source .venv/bin/activate
-pip install -r requirements.txt
-```
-
-### 2. Populate E-Commerce Database (If not present)
-```bash
+.\.venv\Scripts\Activate.ps1
+python -m pip install -r requirements-dev.txt
 python data/create_db.py
+python -m pytest -q
 ```
 
-### 3. Run Automated Comparative Benchmark
-```bash
-python scripts/run_benchmark.py
+Run the deterministic API and UI without configuring a model:
+
+```powershell
+uvicorn api.app:app --reload
 ```
 
-### 4. Run Unit Test Suite
-```bash
-pytest tests/ -v
-```
+In another terminal:
 
-### 5. Launch FastAPI REST Service
-```bash
-uvicorn api.app:app --host 0.0.0.0 --port 8000 --reload
-# View Interactive API Docs at: http://localhost:8000/docs
-```
-
-### 6. Launch Interactive Streamlit Cockpit
-```bash
+```powershell
 streamlit run streamlit_app/app.py
 ```
 
----
+`POST /api/metrics` works without an LLM and is useful for testing supported aggregation behavior. `POST /api/analyze` returns HTTP 503 until a model is configured; it does not fall back to the previous keyword heuristic.
 
-## 🎤 6. Technical Interview Defense Guide
+## Optional local Ollama model
 
-### Q1: "Why choose Google ADK (Agent Development Kit) over LangGraph or basic LangChain?"
-> *"LangGraph is popular for cyclic code-first graphs, but Google ADK provides first-class native alignment with enterprise standards: native **Model Context Protocol (MCP)** tool definitions, Agent2Agent (A2A) protocol capabilities, and hierarchical supervisor-worker separation. In an enterprise production setting, having a clean Coordinator-Planner-Executor-Verifier hierarchy with standardized tool contracts dramatically reduces debugging complexity compared to arbitrary monolithic graphs."*
+Install and start Ollama separately, then pull a tool-capable model that fits your hardware. Model compatibility and quality vary, so run the evaluation cases before making quality claims. Configure:
 
-### Q2: "How do you guarantee that an autonomous agent won't execute destructive SQL or execute arbitrary host commands?"
-> *"We implement a dual-layer security perimeter. First, at the database tool boundary (`SafeSQLQueryTool`), any query token containing mutating keywords (`DROP`, `DELETE`, `UPDATE`, `ALTER`, `GRANT`) is rejected deterministically before reaching the driver. Second, for Python computation, we built `SandboxedPythonExecutor` using Python's `ast` module. The code is parsed into a syntax tree and checked against an AST blacklist. Any attempt to access `os`, `sys`, `subprocess`, or file I/O throws a `SecurityViolation` before execution."*
+```powershell
+$env:ANALYST_MODEL = "ollama_chat/qwen3:4b"
+$env:OLLAMA_BASE_URL = "http://localhost:11434"
+uvicorn api.app:app --reload
+```
 
-### Q3: "What prevents the multi-agent system from getting stuck in infinite self-correction loops?"
-> *"We implemented bounded state machine execution with a strict `max_retries=2` governor. Each retry increments a state counter; if the Verifier rejects an output, diagnostic error feedback is fed to the Planner to adjust the query plan. If the ceiling is reached without verification, the Coordinator fails gracefully with an explicit explanation rather than burning compute in an uncontrolled loop."*
+For Docker Compose, copy `.env.example` to `.env`. Compose points the container at the host Ollama server. On Docker Desktop this uses `host.docker.internal`; the host Ollama service must be running and reachable.
 
-### Q4: "How does the Verifier Agent detect logical errors that don't throw syntax exceptions?"
-> *"Syntax checks only catch invalid SQL. The Verifier Agent inspects the data semantics: it verifies whether the output DataFrame has non-zero rows, ensures that returned column headers match the user's analytical dimensions, checks for null value proliferation, and verifies that percentages sum logically (e.g. status breakdown $\approx 100\%$)."*
+Hosted models can be configured with an ADK-supported model name and the provider's credential set in the environment. Do not commit secrets. The model path is optional and deliberately kept separate from tests that validate the MCP boundary.
+
+## Evaluation and limits
+
+```powershell
+python scripts/run_benchmark.py
+```
+
+This reports a small **tool regression check** that cross-checks several aggregate outputs against independently written SQL on the generated synthetic fixture. It is not an LLM benchmark and says nothing about natural-language intent accuracy, factual response quality, or production-scale throughput. The current test suite covers ADK graph construction, API validation, metric semantics, parameter rejection, SQLite read-only mode, and a real MCP stdio round trip. A full LLM evaluation remains pending until we select and run a model against labeled questions.
+
+The analytics server intentionally cannot answer arbitrary SQL questions. Extend it by adding a narrowly scoped, parameterized tool and independent expected-result tests. Do not replace this with model-generated SQL execution. The bounded pilot below adds operator authentication and resource controls; tenant isolation and per-user/gateway quotas remain unimplemented.
+
+## Architecture
+
+### Bounded serving pilot
+
+`APP_ENV=production` requires `ANALYST_API_KEY` (32+ characters); clients send
+`X-API-Key`. The Streamlit server reads the same key from its environment. Requests
+are bounded to 64 KiB, with two analyses/process, eight LLM calls/run, 128 events,
+bounded answer output and a 60-second deadline. Overload returns 429; timeout 504.
+Provider cancellation is best effort and cannot guarantee cancellation of billed work.
+Run one worker and add external TLS/access controls and gateway quotas before remote use.
+
+The MCP subprocess no longer inherits provider credentials. Responses report model,
+elapsed time and provider token counts rather than an invented currency cost.
+`/ready` requires model configuration and readable storage but does not probe paid
+provider connectivity. Compose binds to loopback ports 8040/8540; the image runs as
+a non-root user. Configure hosted provider credentials outside Git and verify billing
+before a small call. Live LLM quality and telemetry activation remain unmeasured.
+
+```mermaid
+flowchart LR
+    Q[Question] --> P[ADK planner]
+    P --> E[ADK executor]
+    E -->|MCP stdio| M[Separate MCP server]
+    M --> D[Read-only SQLite]
+    D --> M --> E
+    E --> V[ADK verifier]
+    V --> R[FastAPI response]
+```
+
+## Interview framing
+
+Describe this as a local-first ADK/MCP prototype with deliberately constrained data access. Explain that MCP transport, tool contracts, aggregate semantics, and API validation are tested, while model answer quality has not yet been measured. Discuss how you would add a labeled semantic benchmark, compare local/hosted models, trace tool calls, and add tenant controls and per-user quotas before exposing it to users.
+
+## Release verification and operations
+
+The 22 November 2026 local verification passed **32 tests** and repository lint.
+The API image passed non-root, network-isolated serving and actual MCP stdio checks. The independent aggregate regression passed 4/4 cases; no live LLM quality result is claimed.
+
+See the standalone [operations guide](docs/OPERATIONS.md) for configuration,
+failure handling, recovery and rollout limits. Cross-project reports and replay tools
+live in the separate [portfolio guide](https://github.com/sachin2967/ml-portfolio).
+Hosted CI and cloud deployment are separate checks; a local pass does not imply either.

@@ -1,124 +1,170 @@
-"""Model Context Protocol (MCP) standardized tools for analytical data operations."""
+"""Read-only, parameterized analytics tools exposed through MCP."""
+
+from __future__ import annotations
 
 import sqlite3
 from pathlib import Path
-from typing import Any, Dict, List, Optional
-import pandas as pd
-from src.sandbox.executor import SandboxedPythonExecutor
+from typing import Any, Literal
+from urllib.parse import quote
+
+from mcp.server.fastmcp import FastMCP
+
+DEFAULT_DB = Path(__file__).resolve().parents[2] / "data" / "ecommerce.db"
+mcp = FastMCP(
+    "commerce-analytics",
+    instructions="Read-only analytics over the bundled demo commerce database.",
+)
+
+METRICS = {"revenue", "orders", "average_review", "average_delivery_days"}
+DIMENSIONS = {"none", "category", "state", "month", "status"}
 
 
-class SafeSQLQueryTool:
-    """Executes read-only SQL queries against the analytical database."""
-
-    DISALLOWED_KEYWORDS = {"drop", "delete", "insert", "update", "alter", "truncate", "create", "grant"}
-
-    def __init__(self, db_path: Path):
-        self.db_path = db_path
-
-    def execute_query(self, sql_query: str) -> Dict[str, Any]:
-        """Validates and executes read-only SQL."""
-        query_clean = sql_query.strip().lower()
-
-        # Check for forbidden mutation commands
-        tokens = query_clean.split()
-        if any(keyword in tokens for keyword in self.DISALLOWED_KEYWORDS):
-            return {
-                "success": False,
-                "error": "Security Error: Mutating SQL queries (INSERT, UPDATE, DELETE, DROP) are strictly forbidden.",
-                "data": None,
-            }
-
-        try:
-            conn = sqlite3.connect(self.db_path)
-            df = pd.read_sql_query(sql_query, conn)
-            conn.close()
-
-            return {
-                "success": True,
-                "row_count": len(df),
-                "columns": list(df.columns),
-                "data": df.head(50).to_dict(orient="records"),
-                "dataframe": df,
-            }
-        except Exception as e:
-            return {
-                "success": False,
-                "error": f"SQL Execution Error: {e}",
-                "data": None,
-            }
+def _connect(db_path: Path = DEFAULT_DB) -> sqlite3.Connection:
+    """Open a SQLite database read-only and enforce query-only mode."""
+    uri = f"file:{quote(db_path.resolve().as_posix(), safe='/:')}?mode=ro"
+    connection = sqlite3.connect(uri, uri=True, timeout=3)
+    connection.execute("PRAGMA query_only = ON")
+    connection.execute("PRAGMA busy_timeout = 3000")
+    return connection
 
 
-class SchemaInspectionTool:
-    """Inspects database schema, table structures, and foreign key relationships."""
-
-    def __init__(self, db_path: Path):
-        self.db_path = db_path
-
-    def get_full_schema(self) -> Dict[str, Any]:
-        """Returns schemas for all tables with column types and primary/foreign keys."""
-        conn = sqlite3.connect(self.db_path)
-        cur = conn.cursor()
-
-        cur.execute("SELECT name FROM sqlite_master WHERE type='table';")
-        tables = [r[0] for r in cur.fetchall() if not r[0].startswith("sqlite_")]
-
-        schema_info = {}
-        for t in tables:
-            cur.execute(f"PRAGMA table_info({t});")
-            cols = [{"cid": r[0], "name": r[1], "type": r[2], "notnull": bool(r[3]), "pk": bool(r[5])} for r in cur.fetchall()]
-
-            cur.execute(f"PRAGMA foreign_key_list({t});")
-            fks = [{"table": r[2], "from": r[3], "to": r[4]} for r in cur.fetchall()]
-
-            # Sample 2 rows
-            sample_df = pd.read_sql_query(f"SELECT * FROM {t} LIMIT 2;", conn)
-
-            schema_info[t] = {
-                "columns": cols,
-                "foreign_keys": fks,
-                "sample_records": sample_df.to_dict(orient="records"),
-            }
-
-        conn.close()
-        return schema_info
+def inspect_schema(db_path: Path = DEFAULT_DB) -> dict[str, Any]:
+    """Return table/column names only; sample customer records are not exposed."""
+    result: dict[str, Any] = {}
+    with _connect(db_path) as connection:
+        tables = connection.execute(
+            "SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' ORDER BY name"
+        ).fetchall()
+        for (table,) in tables:
+            # Table names originate from sqlite_master and are quoted defensively.
+            escaped = table.replace('"', '""')
+            columns = connection.execute(f'PRAGMA table_info("{escaped}")').fetchall()
+            result[table] = [{"name": row[1], "type": row[2]} for row in columns]
+    return result
 
 
-class MCPToolRegistry:
-    """Standardized tool registry exposing JSON-schema compliant tools."""
+def query_metrics(
+    metric: str,
+    group_by: str = "none",
+    order_status: str | None = None,
+    state: str | None = None,
+    limit: int = 20,
+    db_path: Path = DEFAULT_DB,
+) -> dict[str, Any]:
+    """Compute supported commerce aggregates; SQL structure is fixed and filters are bound."""
+    if metric not in METRICS:
+        raise ValueError(f"Unsupported metric. Choose one of: {sorted(METRICS)}")
+    if group_by not in DIMENSIONS:
+        raise ValueError(f"Unsupported grouping. Choose one of: {sorted(DIMENSIONS)}")
+    if not 1 <= limit <= 100:
+        raise ValueError("limit must be between 1 and 100")
+    if order_status is not None and order_status not in {
+        "delivered",
+        "canceled",
+        "returned",
+        "shipped",
+        "processing",
+    }:
+        raise ValueError("Unsupported order status")
+    if state is not None and (
+        len(state) != 2 or not state.isalpha() or not state.isupper()
+    ):
+        raise ValueError("state must be a two-letter uppercase code")
 
-    def __init__(self, db_path: Path):
-        self.sql_tool = SafeSQLQueryTool(db_path)
-        self.schema_tool = SchemaInspectionTool(db_path)
-        self.sandbox = SandboxedPythonExecutor()
+    value_expr = {
+        "revenue": "SUM(oi.price * oi.quantity)",
+        "orders": "COUNT(DISTINCT o.order_id)",
+        "average_review": "AVG(r.review_score)",
+        "average_delivery_days": "AVG(julianday(o.delivered_date) - julianday(o.order_date))",
+    }[metric]
+    joins: list[str] = []
+    if metric == "revenue":
+        joins.append("JOIN order_items oi ON oi.order_id = o.order_id")
+    elif metric == "average_review":
+        joins.append("JOIN reviews r ON r.order_id = o.order_id")
+    default_filter = (
+        "o.delivered_date IS NOT NULL" if metric == "average_delivery_days" else "1 = 1"
+    )
+    if metric == "revenue" and order_status is None and group_by != "status":
+        default_filter = "o.order_status = 'delivered'"
 
-    def get_tools_description(self) -> List[Dict[str, Any]]:
-        """Returns standard MCP tool signatures."""
-        return [
-            {
-                "name": "inspect_database_schema",
-                "description": "Inspects relational database tables, columns, data types, and foreign key relationships.",
-                "parameters": {"type": "object", "properties": {}},
-            },
-            {
-                "name": "execute_safe_sql",
-                "description": "Executes read-only SQL queries to retrieve tabular data.",
-                "parameters": {
-                    "type": "object",
-                    "properties": {
-                        "query": {"type": "string", "description": "The SELECT SQL query string to run."}
-                    },
-                    "required": ["query"],
-                },
-            },
-            {
-                "name": "execute_sandboxed_pandas",
-                "description": "Runs sandboxed Python/Pandas code for data transformations, percentage changes, or rolling metrics.",
-                "parameters": {
-                    "type": "object",
-                    "properties": {
-                        "code": {"type": "string", "description": "Safe Python code snippet operating on DataFrame 'df'."}
-                    },
-                    "required": ["code"],
-                },
-            },
+    group_expr = {
+        "none": None,
+        "category": "p.category",
+        "state": "c.customer_state",
+        "month": "strftime('%Y-%m', o.order_date)",
+        "status": "o.order_status",
+    }[group_by]
+    if group_by == "category":
+        if metric in {"average_review", "average_delivery_days"}:
+            # Attach one order to each category, avoiding duplicate weighting when
+            # the same order has several items in a category.
+            joins = [
+                "JOIN (SELECT DISTINCT oi3.order_id, p.category FROM order_items oi3 JOIN products p ON p.product_id = oi3.product_id) oc ON oc.order_id = o.order_id"
+            ]
+            if metric == "average_review":
+                joins.append("JOIN reviews r ON r.order_id = o.order_id")
+            group_expr = "oc.category"
+        else:
+            if metric != "revenue":
+                joins.append("JOIN order_items oi ON oi.order_id = o.order_id")
+            joins.append("JOIN products p ON p.product_id = oi.product_id")
+    if group_by == "state" or state:
+        joins.append("JOIN customers c ON c.customer_id = o.customer_id")
+    joins = list(dict.fromkeys(joins))
+    select = f"{group_expr} AS group_value, " if group_expr else ""
+    group_clause = f" GROUP BY {group_expr}" if group_expr else ""
+    filters = [default_filter]
+    params: list[Any] = []
+    if order_status:
+        filters.append("o.order_status = ?")
+        params.append(order_status)
+    if state:
+        filters.append("c.customer_state = ?")
+        params.append(state)
+    sql = (
+        f"SELECT {select}{value_expr} AS value FROM orders o {' '.join(joins)} "
+        f"WHERE {' AND '.join(filters)}{group_clause} ORDER BY value DESC LIMIT ?"
+    )
+    params.append(limit)
+    with _connect(db_path) as connection:
+        rows = connection.execute(sql, params).fetchall()
+        columns = [
+            description[0]
+            for description in connection.execute(sql, params).description
         ]
+    records = [dict(zip(columns, row)) for row in rows]
+    return {
+        "metric": metric,
+        "group_by": group_by,
+        "row_count": len(records),
+        "records": records,
+    }
+
+
+@mcp.tool()
+def get_analytics_schema() -> dict[str, Any]:
+    """List available commerce tables and columns without exposing sample rows."""
+    return inspect_schema()
+
+
+@mcp.tool()
+def analyze_commerce(
+    metric: Literal["revenue", "orders", "average_review", "average_delivery_days"],
+    group_by: Literal["none", "category", "state", "month", "status"] = "none",
+    order_status: Literal["delivered", "canceled", "returned", "shipped", "processing"]
+    | None = None,
+    state: str | None = None,
+    limit: int = 20,
+) -> dict[str, Any]:
+    """Return a supported, read-only commerce aggregate. Never accepts SQL or Python code."""
+    return query_metrics(metric, group_by, order_status, state, limit)
+
+
+def main() -> None:
+    """Run the MCP server over stdio for a local ADK client."""
+    mcp.run(transport="stdio")
+
+
+if __name__ == "__main__":
+    main()

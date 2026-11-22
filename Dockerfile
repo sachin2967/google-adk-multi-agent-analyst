@@ -1,5 +1,5 @@
 # Multi-stage Dockerfile for Google ADK Multi-Agent Analyst
-FROM python:3.11-slim as builder
+FROM python:3.11-slim AS builder
 
 WORKDIR /app
 COPY requirements.txt .
@@ -8,15 +8,19 @@ RUN pip install --no-cache-dir --user -r requirements.txt
 FROM python:3.11-slim
 WORKDIR /app
 
-COPY --from=builder /root/.local /root/.local
-ENV PATH=/root/.local/bin:$PATH
+COPY --from=builder /root/.local /opt/python
+ENV PATH=/opt/python/bin:$PATH
+ENV PYTHONPATH=/opt/python/lib/python3.11/site-packages
 ENV PYTHONUNBUFFERED=1
 
 COPY src/ src/
 COPY api/ api/
 COPY data/ data/
 COPY streamlit_app/ streamlit_app/
-COPY benchmark_report.json .
+RUN python data/create_db.py
+RUN groupadd --system app && useradd --system --gid app --home-dir /app app \
+    && chown -R app:app /app
+USER app
 
 EXPOSE 8000 8501
 

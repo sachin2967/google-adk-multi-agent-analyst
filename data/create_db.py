@@ -2,8 +2,8 @@
 
 import sqlite3
 from pathlib import Path
+
 import numpy as np
-import pandas as pd
 
 
 def create_sample_database(db_path: Path):
@@ -77,7 +77,14 @@ def create_sample_database(db_path: Path):
     np.random.seed(42)
 
     # Populate Customers (500 customers across Indian metro hubs)
-    cities = [("Bengaluru", "KA"), ("Mumbai", "MH"), ("Delhi", "DL"), ("Hyderabad", "TG"), ("Pune", "MH"), ("Chennai", "TN")]
+    cities = [
+        ("Bengaluru", "KA"),
+        ("Mumbai", "MH"),
+        ("Delhi", "DL"),
+        ("Hyderabad", "TG"),
+        ("Pune", "MH"),
+        ("Chennai", "TN"),
+    ]
     customers_data = []
     for i in range(1, 501):
         c_id = f"CUST_{i:04d}"
@@ -87,7 +94,13 @@ def create_sample_database(db_path: Path):
     cur.executemany("INSERT INTO customers VALUES (?, ?, ?, ?)", customers_data)
 
     # Populate Products (50 products across categories)
-    categories = ["Electronics", "Fashion", "Home & Kitchen", "Beauty & Personal", "Books & Stationery"]
+    categories = [
+        "Electronics",
+        "Fashion",
+        "Home & Kitchen",
+        "Beauty & Personal",
+        "Books & Stationery",
+    ]
     products_data = []
     for i in range(1, 51):
         p_id = f"PROD_{i:03d}"
@@ -101,7 +114,14 @@ def create_sample_database(db_path: Path):
     orders_data = []
     items_data = []
     reviews_data = []
-    statuses = ["delivered", "delivered", "delivered", "delivered", "shipped", "canceled"]
+    statuses = [
+        "delivered",
+        "delivered",
+        "delivered",
+        "delivered",
+        "shipped",
+        "canceled",
+    ]
 
     for i in range(1, 1201):
         o_id = f"ORD_{i:05d}"
@@ -110,16 +130,22 @@ def create_sample_database(db_path: Path):
         m = np.random.randint(1, 13)
         d = np.random.randint(1, 25)
         order_date = f"2025-{m:02d}-{d:02d}"
-        deliv_date = f"2025-{m:02d}-{d+np.random.randint(2, 6):02d}" if status == "delivered" else None
+        deliv_date = (
+            f"2025-{m:02d}-{d + np.random.randint(2, 6):02d}"
+            if status == "delivered"
+            else None
+        )
         orders_data.append((o_id, cust_id, status, order_date, deliv_date))
 
         # 1 to 3 items per order
-        num_items = np.random.choice([1, 2, 3], p=[0.7, 0.2, 0.1])
+        # Convert NumPy scalars before SQLite binding. Some NumPy releases adapt
+        # np.int64 as a BLOB, silently corrupting COUNT/SUM and AVG queries.
+        num_items = int(np.random.choice([1, 2, 3], p=[0.7, 0.2, 0.1]))
         for item_idx in range(1, num_items + 1):
             prod = products_data[np.random.choice(len(products_data))]
             prod_id = prod[0]
             price = prod[3]
-            qty = np.random.choice([1, 2], p=[0.85, 0.15])
+            qty = int(np.random.choice([1, 2], p=[0.85, 0.15]))
             freight = round(float(np.random.uniform(40, 150)), 2)
             seller_id = f"SELLER_{np.random.randint(1, 40):03d}"
             items_data.append((o_id, item_idx, prod_id, seller_id, qty, price, freight))
@@ -127,7 +153,9 @@ def create_sample_database(db_path: Path):
         # Reviews for delivered orders
         if status == "delivered" and np.random.rand() > 0.15:
             r_id = f"REV_{i:05d}"
-            score = np.random.choice([1, 2, 3, 4, 5], p=[0.08, 0.07, 0.12, 0.28, 0.45])
+            score = int(
+                np.random.choice([1, 2, 3, 4, 5], p=[0.08, 0.07, 0.12, 0.28, 0.45])
+            )
             comments = {
                 1: "Damaged item received, delivery delayed by 4 days.",
                 2: "Poor packaging and late arrival.",

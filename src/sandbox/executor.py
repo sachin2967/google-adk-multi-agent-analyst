@@ -1,134 +1,60 @@
-"""AST-parsed execution sandbox for safe Python and Pandas operations.
+"""Safe, fixed dataframe transformations for the local analytics demo.
 
-Enforces zero-trust code inspection, forbidding unsafe syscalls, file writes,
-and network operations before code execution.
+This module deliberately does not execute generated Python. AST inspection is
+not a security boundary for Python's object model; callers select from a small
+set of trusted operations implemented in this module instead.
 """
 
-import ast
-import io
-import sys
-from typing import Any, Dict, Optional, Tuple
-import matplotlib.pyplot as plt
-import numpy as np
+from typing import Any
+
 import pandas as pd
 
 
 class SecurityViolation(Exception):
-    """Raised when generated code attempts an unauthorized operation."""
-    pass
+    """Raised when a caller requests arbitrary code execution."""
 
 
-class SafeASTVisitor(ast.NodeVisitor):
-    """Inspects AST nodes against an authorized whitelist."""
+class DataFrameOperationRegistry:
+    """Dispatcher for allowlisted dataframe operations.
 
-    FORBIDDEN_MODULES = {
-        "os", "sys", "subprocess", "shutil", "socket", "requests", "urllib",
-        "importlib", "pickle", "ctypes", "pathlib", "builtin", "builtins"
-    }
-
-    FORBIDDEN_CALLS = {
-        "eval", "exec", "open", "__import__", "compile", "globals", "locals", "getattr", "setattr"
-    }
-
-    def visit_Import(self, node):
-        for alias in node.names:
-            base_module = alias.name.split(".")[0]
-            if base_module in self.FORBIDDEN_MODULES:
-                raise SecurityViolation(f"Unauthorized import attempt: '{alias.name}'")
-        self.generic_visit(node)
-
-    def visit_ImportFrom(self, node):
-        if node.module:
-            base_module = node.module.split(".")[0]
-            if base_module in self.FORBIDDEN_MODULES:
-                raise SecurityViolation(f"Unauthorized import attempt: 'from {node.module}'")
-        self.generic_visit(node)
-
-    def visit_Call(self, node):
-        if isinstance(node.func, ast.Name):
-            if node.func.id in self.FORBIDDEN_CALLS:
-                raise SecurityViolation(f"Forbidden function invocation: '{node.func.id}()'")
-        self.generic_visit(node)
-
-
-class SandboxedPythonExecutor:
-    """Safely executes sanitized Python data manipulation code."""
-
-    def __init__(self):
-        self.visitor = SafeASTVisitor()
-
-    def validate_code(self, code: str) -> None:
-        """Parses and inspects code AST. Raises SecurityViolation if unsafe."""
-        try:
-            tree = ast.parse(code)
-        except SyntaxError as e:
-            raise ValueError(f"Syntax error in generated code: {e}")
-
-        self.visitor.visit(tree)
+    No Python source is parsed or passed to ``exec``. Add new transformations
+    as explicit functions after reviewing their input and output contract.
+    """
 
     def execute(
-        self, code: str, initial_context: Optional[Dict[str, Any]] = None
-    ) -> Tuple[bool, Any, Optional[str], Optional[plt.Figure]]:
-        """Executes validated code in a restricted scope.
+        self, code: str, initial_context: dict[str, Any] | None = None
+    ) -> tuple[bool, Any, str | None, None]:
+        del code, initial_context
+        return (
+            False,
+            None,
+            (
+                "Arbitrary Python execution is disabled; use an allowlisted dataframe operation."
+            ),
+            None,
+        )
 
-        Returns:
-            success: bool
-            result: return value or stdout
-            error: error message if failed
-            figure: matplotlib figure if generated
-        """
+    @staticmethod
+    def monthly_growth(df: pd.DataFrame) -> pd.DataFrame:
+        """Return a copy with percentage month-over-month revenue change."""
+        if not isinstance(df, pd.DataFrame) or "monthly_revenue" not in df.columns:
+            raise ValueError("monthly_growth requires a DataFrame with monthly_revenue")
+        result = df.copy()
+        result["mom_growth_pct"] = result["monthly_revenue"].pct_change() * 100.0
+        return result
+
+    def execute_operation(
+        self, operation: str, df: pd.DataFrame | None
+    ) -> tuple[bool, Any, str | None]:
+        if operation != "monthly_growth":
+            return False, None, f"Unsupported dataframe operation: {operation}"
         try:
-            self.validate_code(code)
-        except (SecurityViolation, ValueError) as sec_err:
-            return False, None, str(sec_err), None
+            if df is None:
+                raise ValueError("monthly_growth requires a DataFrame")
+            return True, self.monthly_growth(df), None
+        except (TypeError, ValueError) as exc:
+            return False, None, str(exc)
 
-        # Prepare restricted execution globals
-        safe_globals = {
-            "pd": pd,
-            "np": np,
-            "plt": plt,
-            "print": print,
-            "len": len,
-            "range": range,
-            "round": round,
-            "sum": sum,
-            "max": max,
-            "min": min,
-            "dict": dict,
-            "list": list,
-            "set": set,
-            "str": str,
-            "int": int,
-            "float": float,
-            "bool": bool,
-        }
 
-        if initial_context:
-            safe_globals.update(initial_context)
-
-        # Capture stdout
-        old_stdout = sys.stdout
-        redirected_output = io.StringIO()
-        sys.stdout = redirected_output
-
-        # Clear any prior plots
-        plt.close("all")
-
-        try:
-            exec_locals = {}
-            exec(code, safe_globals, exec_locals)
-            output = redirected_output.getvalue().strip()
-
-            # Retrieve result variable if present
-            result_val = exec_locals.get("result", output if output else "Executed successfully.")
-
-            # Check if a plot was created
-            fig = plt.gcf() if plt.get_fignums() else None
-
-            return True, result_val, None, fig
-
-        except Exception as run_err:
-            return False, None, f"Execution Runtime Error: {run_err}", None
-
-        finally:
-            sys.stdout = old_stdout
+# Historical import alias; this does not execute Python or provide a sandbox.
+SandboxedPythonExecutor = DataFrameOperationRegistry

@@ -2,5 +2,9 @@ __pycache__/
 *.py[cod]
 *$py.class
 .pytest_cache/
+tool_regression_report.json
 data/*.db
 .venv/
+.env
+.env.*
+!.env.example

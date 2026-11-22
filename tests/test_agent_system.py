@@ -1,37 +1,41 @@
-"""Unit tests for the Google ADK Coordinator, Planner, Executor, and Verifier."""
+"""Contract tests for genuine ADK composition and explicit model configuration."""
 
-from pathlib import Path
 import pytest
-from src.agents.adk_system import ADKCoordinatorAgent
+
+from src.agents.adk_system import build_analyst_agent
 
 
-@pytest.fixture
-def coordinator():
-    db_p = Path(__file__).resolve().parent.parent / "data" / "ecommerce.db"
-    return ADKCoordinatorAgent(db_p)
+def test_agent_is_google_adk_agent_with_mcp_toolset():
+    from google.adk.agents import LlmAgent, SequentialAgent
+    from google.adk.tools.mcp_tool import McpToolset
+
+    agent = build_analyst_agent(model="gemini-2.0-flash")
+    assert isinstance(agent, SequentialAgent)
+    assert [child.name for child in agent.sub_agents] == [
+        "analytics_planner",
+        "mcp_analytics_executor",
+        "analytics_verifier",
+    ]
+    executor = agent.sub_agents[1]
+    assert isinstance(executor, LlmAgent)
+    assert len(executor.tools) == 1
+    assert isinstance(executor.tools[0], McpToolset)
+    assert executor.tools[0].tool_filter == ["get_analytics_schema", "analyze_commerce"]
 
 
-def test_coordinator_category_revenue(coordinator):
-    res = coordinator.answer_query("What is the total delivered revenue by product category?")
-    assert res.success is True
-    assert res.dataframe is not None
-    assert not res.dataframe.empty
-    assert "total_revenue" in res.dataframe.columns
-    assert len(res.steps_trace) >= 3
+def test_agent_requires_explicit_model(monkeypatch):
+    monkeypatch.delenv("ANALYST_MODEL", raising=False)
+    with pytest.raises(RuntimeError, match="No LLM is configured"):
+        build_analyst_agent()
 
 
-def test_coordinator_review_analytics(coordinator):
-    res = coordinator.answer_query("What is the average review score across each category?")
-    assert res.success is True
-    assert res.dataframe is not None
-    assert "avg_review_score" in res.dataframe.columns
+def test_ollama_model_is_configured_as_local_litellm_provider(monkeypatch):
+    from google.adk.models.lite_llm import LiteLlm
 
-
-def test_coordinator_verification_trace(coordinator):
-    res = coordinator.answer_query("Show me order status percentage breakdown.")
-    assert res.success is True
-    agent_names = [step.agent_name for step in res.steps_trace]
-    assert "CoordinatorAgent" in agent_names
-    assert "PlannerAgent" in agent_names
-    assert "ToolExecutorAgent" in agent_names
-    assert "VerifierAgent" in agent_names
+    monkeypatch.setenv("ANALYST_MODEL", "ollama_chat/qwen3:4b")
+    monkeypatch.setenv("OLLAMA_BASE_URL", "http://localhost:11434")
+    agent = build_analyst_agent()
+    model = agent.sub_agents[0].model
+    assert isinstance(model, LiteLlm)
+    assert model._additional_args["api_base"] == "http://localhost:11434"
+    assert "api_key" not in model._additional_args

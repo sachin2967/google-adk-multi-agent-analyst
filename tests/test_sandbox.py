@@ -1,50 +1,33 @@
-"""Unit tests for AST-parsed safe Python execution sandbox."""
+"""The analytics tool layer only permits fixed dataframe operations."""
 
-import pytest
-from src.sandbox.executor import SandboxedPythonExecutor, SecurityViolation
-
-
-@pytest.fixture
-def sandbox():
-    return SandboxedPythonExecutor()
-
-
-def test_safe_math_execution(sandbox):
-    code = """
-import numpy as np
 import pandas as pd
-data = [10, 20, 30, 40]
-result = np.mean(data)
-"""
-    success, res, err, _ = sandbox.execute(code)
-    assert success is True
-    assert res == 25.0
-    assert err is None
+import pytest
+
+from src.sandbox.executor import SandboxedPythonExecutor
 
 
-def test_block_os_import(sandbox):
-    code = "import os\nos.system('whoami')"
-    success, res, err, _ = sandbox.execute(code)
-    assert success is False
-    assert "Unauthorized import attempt" in err
+def test_monthly_growth_operation():
+    executor = SandboxedPythonExecutor()
+    frame = pd.DataFrame({"monthly_revenue": [100.0, 125.0, 100.0]})
+    ok, result, error = executor.execute_operation("monthly_growth", frame)
+    assert ok and error is None
+    assert result["mom_growth_pct"].iloc[1] == 25.0
+    assert result["mom_growth_pct"].iloc[2] == pytest.approx(-20.0)
+    assert "mom_growth_pct" not in frame.columns
 
 
-def test_block_subprocess_import(sandbox):
-    code = "import subprocess\nsubprocess.run(['ls'])"
-    success, res, err, _ = sandbox.execute(code)
-    assert success is False
-    assert "Unauthorized import attempt" in err
+def test_arbitrary_python_is_never_executed(tmp_path):
+    marker = tmp_path / "should_not_exist"
+    code = f"open({str(marker)!r}, 'w').write('executed')"
+    ok, _result, error, _ = SandboxedPythonExecutor().execute(code)
+    assert not ok
+    assert "disabled" in error
+    assert not marker.exists()
 
 
-def test_block_eval_call(sandbox):
-    code = "eval('1 + 1')"
-    success, res, err, _ = sandbox.execute(code)
-    assert success is False
-    assert "Forbidden function invocation" in err
-
-
-def test_block_file_open(sandbox):
-    code = "f = open('test.txt', 'w')"
-    success, res, err, _ = sandbox.execute(code)
-    assert success is False
-    assert "Forbidden function invocation" in err
+def test_unknown_operation_is_rejected():
+    ok, _, error = SandboxedPythonExecutor().execute_operation(
+        "arbitrary", pd.DataFrame()
+    )
+    assert not ok
+    assert "Unsupported" in error
