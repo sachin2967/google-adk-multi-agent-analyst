@@ -63,6 +63,32 @@ The analytics server intentionally cannot answer arbitrary SQL questions. Extend
 
 ## Architecture
 
+### Frozen live-evaluation protocol
+
+[Twelve frozen questions](data/analyst_questions_v1.json) cover supported metrics,
+filters, grouping, absent data, unsupported requests and injection attempts.
+Eight supported cases pass independently authored SQL checks in the
+[offline preflight](evaluation/analyst_preflight.json); this is tool-contract
+evidence. Four refusal cases require a live model before they can be measured.
+
+```powershell
+python scripts/evaluate_live.py --split all --max-cases 12
+# Only after configuring a provider and choosing its allowed usage budget:
+python scripts/evaluate_live.py --live --split development --max-cases 2 --output evaluation/live_development_01.json
+python scripts/evaluate_live.py --live --split test --max-cases 10 --output evaluation/live_test_01.json
+```
+
+The CLI reads server-side credentials/model configuration from the ignored `.env`
+without printing secrets. Without `--live`, it never calls a provider. Live runs
+compare one MCP-equipped agent with the planner/executor/verifier workflow using
+the same configured model and structured answer contract. Exact tool arguments
+and result records are scored against independent SQL, with latency, provider
+token counts and failure types recorded. Each run has an eight-call/60-second
+bound. Two development questions mean four runs and at most 32 logical LLM calls;
+provider retries/cancellation can affect actual billed usage. No model has been
+evaluated live in this verification. The small synthetic question set and exact
+answer scoring do not establish general usefulness or safety.
+
 ### Bounded serving pilot
 
 `APP_ENV=production` requires `ANALYST_API_KEY` (32+ characters); clients send
@@ -96,7 +122,7 @@ Describe this as a local-first ADK/MCP prototype with deliberately constrained d
 
 ## Release verification and operations
 
-The 22 November 2026 local verification passed **32 tests** and repository lint.
+The latest 22 November 2026 local verification passed **41 tests** and repository lint.
 The API image passed non-root, network-isolated serving and actual MCP stdio checks. The independent aggregate regression passed 4/4 cases; no live LLM quality result is claimed.
 
 See the standalone [operations guide](docs/OPERATIONS.md) for configuration,
