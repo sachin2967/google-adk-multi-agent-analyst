@@ -12,6 +12,10 @@ a seeded SQLite fixture. The model never supplies SQL or Python.
 > **Scope.** This is a prototype on a **synthetic** database. CI exercises the agent
 > workflow with a scripted model, so **live LLM answer quality has not been measured**.
 
+![Streamlit commerce metrics grouped by category on the seeded database](docs/images/synthetic-commerce-metrics.png)
+
+*The metrics tab queries the seeded synthetic database. The model is unconfigured in this capture.*
+
 ## Highlights
 
 - **Real ADK and MCP:** three `LlmAgent` steps (`analytics_planner`,
