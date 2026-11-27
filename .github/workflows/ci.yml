@@ -27,3 +27,5 @@ jobs:
         run: python -m pytest -q
       - name: Check MCP tool aggregates
         run: python scripts/run_benchmark.py
+      - name: Validate frozen analyst cases without provider calls
+        run: python scripts/evaluate_live.py --split all --max-cases 12

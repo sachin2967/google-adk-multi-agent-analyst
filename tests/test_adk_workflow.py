@@ -11,6 +11,7 @@ from google.genai import types
 from pydantic import PrivateAttr
 
 from src.agents.adk_system import build_analyst_agent
+from src.agents.service import _run_agent
 
 
 class ScriptedModel(BaseLlm):
@@ -97,5 +98,25 @@ def test_sequential_adk_workflow_calls_real_mcp_server_offline():
             if part.text
         )
         assert "Verified" in final_text
+
+    asyncio.run(exercise())
+
+
+def test_service_collects_final_answer_and_actual_tool_arguments_offline():
+    async def exercise():
+        app = App(
+            name="commerce_analytics",
+            root_agent=build_analyst_agent(model=ScriptedModel()),
+        )
+        result = await _run_agent(
+            "Revenue by product category", app=app, capture_trace=True
+        )
+        assert "Verified" in result["answer"]
+        calls = [
+            c for c in result["tool_calls"] if c["name"].endswith("analyze_commerce")
+        ]
+        assert calls[0]["args"]["metric"] == "revenue"
+        assert calls[0]["args"]["group_by"] == "category"
+        assert result["event_count"] > 0
 
     asyncio.run(exercise())
