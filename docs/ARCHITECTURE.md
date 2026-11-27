@@ -15,7 +15,7 @@ flowchart TB
 ```
 
 - **Request boundary** (`api/boundary.py`): enforces `X-API-Key` when configured
-  (required in production), bounds bodies to 64 KiB and returns correlation-safe errors.
+  (required in production), rejects bodies over 64 KiB with 413, and returns 503 in production if the key is shorter than 32 characters. `/live`, `/health` and `/ready` skip the key check.
 - **Run service** (`src/agents/service.py`): two concurrent runs per process, at most
   eight LLM calls per run, 128 events, 16,000 characters of answers and a 60 s deadline.
   Overload maps to 429 and timeout to 504.
@@ -38,7 +38,8 @@ questions need a new reviewed tool and an independent expected-result test.
 | Condition | Response |
 | --- | --- |
 | No `ANALYST_MODEL` | 503 on `/api/analyze`; `/ready` reports not ready |
-| Missing or wrong key (production) | 401 |
+| Missing or wrong key (when a key is set) | 401 |
+| Body over 64 KiB | 413 |
 | Too many concurrent analyses | 429 with `Retry-After` |
 | Run exceeds deadline | 504 |
-| Output over bound | Rejected rather than truncated silently |
+| Answer over size budget or empty | Run fails with an output error rather than truncating silently |
