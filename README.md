@@ -1,105 +1,153 @@
-# Local Commerce Analyst with Google ADK and MCP
+# Commerce Analyst: Google ADK + MCP
 
-A local-first, tool-using commerce analytics demo. A Google ADK sequential workflow runs a planner, an MCP-backed analytics executor, and a verifier. The executor connects over MCP stdio to a separate Python process. The server exposes only parameterized, read-only aggregate tools over a seeded SQLite fixture; it never accepts caller-supplied SQL or Python source.
+[![CI](https://github.com/sachin2967/google-adk-multi-agent-analyst/actions/workflows/ci.yml/badge.svg)](https://github.com/sachin2967/google-adk-multi-agent-analyst/actions/workflows/ci.yml)
+![Python 3.11](https://img.shields.io/badge/python-3.11-blue)
+![License: MIT](https://img.shields.io/badge/license-MIT-green)
 
-## What is implemented
+A local-first, tool-using analytics agent. A Google ADK `SequentialAgent` runs a
+planner, an MCP-backed executor and a verifier. The executor talks over MCP stdio to a
+separate Python process that exposes only parameterized, read-only aggregate tools over
+a seeded SQLite fixture. The model never supplies SQL or Python.
 
-- **Google ADK runtime:** a real `SequentialAgent` with three `LlmAgent` steps (`analytics_planner`, `mcp_analytics_executor`, `analytics_verifier`).
-- **MCP:** a real stdio MCP server and client, with tool discovery and tool calls tested using the official MCP Python SDK.
-- **Constrained data access:** two tools, schema metadata and a fixed set of commerce metrics. Metric/group/filter values are validated; SQL query structure is application-authored and filter values use bound parameters.
-- **API and UI:** FastAPI exposes health, schema, deterministic metric, and configured-agent endpoints. Streamlit is a separate API client.
-- **Local model support:** LiteLLM through ADK can route to an Ollama model. There is no API key requirement for a local Ollama instance. No model is bundled or downloaded automatically.
-- **Seeded test data:** `data/create_db.py` generates the synthetic fixture. Native Python integer values are bound to SQLite to avoid NumPy scalar adaptation as binary blobs.
+> **Scope.** This is a prototype on a **synthetic** database. CI exercises the agent
+> workflow with a scripted model, so **live LLM answer quality has not been measured**.
 
-## Setup
+## Highlights
 
-Python 3.11 is supported. Create the fixture and install the project dependencies:
+- **Real ADK and MCP:** three `LlmAgent` steps (`analytics_planner`,
+  `mcp_analytics_executor`, `analytics_verifier`) and a real stdio MCP server/client
+  with tool discovery and calls, tested with the official MCP Python SDK.
+- **Constrained data access:** two tools, schema metadata and a fixed set of metrics
+  (`revenue`, `orders`, `average_review`, `average_delivery_days`) grouped by `none`,
+  `category`, `state`, `month` or `status`. Inputs are validated against allowlists;
+  query structure is application-authored and filter values are bound parameters.
+- **No code execution:** caller-supplied SQL or Python is never accepted or run.
+- **Bounded serving:** operator API key in production, 64 KiB request bodies, two
+  concurrent analyses per process, eight LLM calls per run, 128 events, capped answer
+  size and a 60 s deadline (overload returns 429, timeout 504).
+- **No silent fallback:** `POST /api/analyze` returns 503 until a model is configured.
+- **Local or hosted models:** Ollama through LiteLLM, or any ADK-supported model.
 
-```powershell
-python -m venv .venv
-.\.venv\Scripts\Activate.ps1
-python -m pip install -r requirements-dev.txt
-python data/create_db.py
-python -m pytest -q
-```
+## Evaluation
 
-Run the deterministic API and UI without configuring a model:
+| Check | Result | What it shows |
+| --- | --- | --- |
+| Test suite | 32 passing; Ruff lint and format clean | ADK graph, API validation, metric semantics, parameter rejection, read-only SQLite, MCP stdio round trip, service limits |
+| Tool regression (`scripts/run_benchmark.py`) | 4 of 4 pass | MCP aggregates match independently written SQL on the synthetic fixture |
+| Live LLM answer quality | **Not measured** | Needs a frozen labeled question set and a configured model |
 
-```powershell
-uvicorn api.app:app --reload
-```
-
-In another terminal:
-
-```powershell
-streamlit run streamlit_app/app.py
-```
-
-`POST /api/metrics` works without an LLM and is useful for testing supported aggregation behavior. `POST /api/analyze` returns HTTP 503 until a model is configured; it does not fall back to the previous keyword heuristic.
-
-## Optional local Ollama model
-
-Install and start Ollama separately, then pull a tool-capable model that fits your hardware. Model compatibility and quality vary, so run the evaluation cases before making quality claims. Configure:
-
-```powershell
-$env:ANALYST_MODEL = "ollama_chat/qwen3:4b"
-$env:OLLAMA_BASE_URL = "http://localhost:11434"
-uvicorn api.app:app --reload
-```
-
-For Docker Compose, copy `.env.example` to `.env`. Compose points the container at the host Ollama server. On Docker Desktop this uses `host.docker.internal`; the host Ollama service must be running and reachable.
-
-Hosted models can be configured with an ADK-supported model name and the provider's credential set in the environment. Do not commit secrets. The model path is optional and deliberately kept separate from tests that validate the MCP boundary.
-
-## Evaluation and limits
-
-```powershell
-python scripts/run_benchmark.py
-```
-
-This reports a small **tool regression check** that cross-checks several aggregate outputs against independently written SQL on the generated synthetic fixture. It is not an LLM benchmark and says nothing about natural-language intent accuracy, factual response quality, or production-scale throughput. The current test suite covers ADK graph construction, API validation, metric semantics, parameter rejection, SQLite read-only mode, and a real MCP stdio round trip. A full LLM evaluation remains pending until we select and run a model against labeled questions.
-
-The analytics server intentionally cannot answer arbitrary SQL questions. Extend it by adding a narrowly scoped, parameterized tool and independent expected-result tests. Do not replace this with model-generated SQL execution. The bounded pilot below adds operator authentication and resource controls; tenant isolation and per-user/gateway quotas remain unimplemented.
+The 4 cases are delivered revenue by category, order counts by status, overall average
+review and order counts by state. They validate the data tools, not natural-language
+understanding, and say nothing about production scale. See
+[docs/EVALUATION.md](docs/EVALUATION.md).
 
 ## Architecture
-
-### Bounded serving pilot
-
-`APP_ENV=production` requires `ANALYST_API_KEY` (32+ characters); clients send
-`X-API-Key`. The Streamlit server reads the same key from its environment. Requests
-are bounded to 64 KiB, with two analyses/process, eight LLM calls/run, 128 events,
-bounded answer output and a 60-second deadline. Overload returns 429; timeout 504.
-Provider cancellation is best effort and cannot guarantee cancellation of billed work.
-Run one worker and add external TLS/access controls and gateway quotas before remote use.
-
-The MCP subprocess no longer inherits provider credentials. Responses report model,
-elapsed time and provider token counts rather than an invented currency cost.
-`/ready` requires model configuration and readable storage but does not probe paid
-provider connectivity. Compose binds to loopback ports 8040/8540; the image runs as
-a non-root user. Configure hosted provider credentials outside Git and verify billing
-before a small call. Live LLM quality and telemetry activation remain unmeasured.
 
 ```mermaid
 flowchart LR
     Q[Question] --> P[ADK planner]
     P --> E[ADK executor]
-    E -->|MCP stdio| M[Separate MCP server]
-    M --> D[Read-only SQLite]
+    E -->|MCP stdio| M[MCP server<br/>allowlisted tools]
+    M --> D[(Read-only SQLite)]
     D --> M --> E
     E --> V[ADK verifier]
     V --> R[FastAPI response]
 ```
 
-## Interview framing
+Details in [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
 
-Describe this as a local-first ADK/MCP prototype with deliberately constrained data access. Explain that MCP transport, tool contracts, aggregate semantics, and API validation are tested, while model answer quality has not yet been measured. Discuss how you would add a labeled semantic benchmark, compare local/hosted models, trace tool calls, and add tenant controls and per-user quotas before exposing it to users.
+## Quickstart
 
-## Release verification and operations
+Requires Python 3.11.
 
-The 22 November 2026 local verification passed **32 tests** and repository lint.
-The API image passed non-root, network-isolated serving and actual MCP stdio checks. The independent aggregate regression passed 4/4 cases; no live LLM quality result is claimed.
+```bash
+git clone https://github.com/sachin2967/google-adk-multi-agent-analyst.git
+cd google-adk-multi-agent-analyst
+python -m venv .venv && source .venv/bin/activate   # Windows: .\.venv\Scripts\Activate.ps1
+make setup data test
+make api          # http://127.0.0.1:8040/docs
+make dashboard    # Streamlit client on :8540
+```
 
-See the standalone [operations guide](docs/OPERATIONS.md) for configuration,
-failure handling, recovery and rollout limits. Cross-project reports and replay tools
-live in the separate [portfolio guide](https://github.com/sachin2967/ml-portfolio).
-Hosted CI and cloud deployment are separate checks; a local pass does not imply either.
+PowerShell equivalent without `make`:
+
+```powershell
+python -m venv .venv; .\.venv\Scripts\Activate.ps1
+python -m pip install -r requirements-dev.txt
+python data/create_db.py
+python -m pytest -q
+uvicorn api.app:app --host 127.0.0.1 --port 8040
+```
+
+`POST /api/metrics` works with no model:
+
+```bash
+curl -s -X POST http://127.0.0.1:8040/api/metrics -H 'Content-Type: application/json' \
+  -d '{"metric":"revenue","group_by":"category","limit":5}'
+```
+
+### Enable the agent endpoint
+
+Run a tool-capable model separately, then set the model before starting the API:
+
+```bash
+export ANALYST_MODEL="ollama_chat/qwen3:4b"   # example; quality varies by model
+export OLLAMA_BASE_URL="http://localhost:11434"
+make api
+```
+
+Hosted models need an ADK-supported model ID and the provider credential in the
+environment (never in Git). With Docker Compose, copy `.env.example` to `.env`; the
+container reaches the host Ollama server. No model is bundled.
+
+## API
+
+| Route | Purpose |
+| --- | --- |
+| `GET /live` | Process liveness |
+| `GET /ready`, `/health` | Configuration and storage checks (provider connectivity is not probed) |
+| `GET /api/schema` | Analytics schema description |
+| `POST /api/metrics` | Deterministic allowlisted aggregation, no LLM |
+| `POST /api/analyze` | Run the ADK workflow; 503 without a model, 429 when busy, 504 on timeout |
+
+## Production-style settings
+
+`APP_ENV=production` requires `ANALYST_API_KEY` (32+ characters); clients send
+`X-API-Key` and the Streamlit server reads the key from its environment. The MCP
+subprocess does not inherit provider credentials. Responses report model, elapsed time
+and provider token counts, not an invented currency cost. Run one worker, bind to
+loopback and add TLS, access control and gateway quotas before remote use. See
+[docs/OPERATIONS.md](docs/OPERATIONS.md).
+
+## Repository layout
+
+| Path | Responsibility |
+| --- | --- |
+| `src/agents/` | ADK sequential workflow and the bounded run service |
+| `src/tools/mcp_tools.py` | MCP server and allowlisted metric tools |
+| `src/sandbox/executor.py` | Fixed dataframe operation registry (no code execution) |
+| `src/evaluation/benchmark.py` | Independent-SQL tool regression |
+| `api/` | FastAPI app and request boundary (auth, size limits) |
+| `streamlit_app/` | Dashboard that calls the API |
+| `data/create_db.py` | Seeded synthetic SQLite fixture (500 customers, 50 products, 1,200 orders) |
+| `scripts/run_benchmark.py` | Runs the tool regression |
+| `tests/` | 32 tests |
+| `docs/` | Architecture, evaluation, operations |
+
+## Limitations
+
+- Synthetic data; results say nothing about a real business.
+- No live-model evaluation, so answer quality, latency and cost per question are unknown.
+- The server cannot answer arbitrary SQL questions by design. Extend it with a narrow,
+  parameterized tool plus an independent expected-result test, never model-generated SQL.
+- No tenant isolation or per-user quotas; the API key is an operator key, not user identity.
+- Provider cancellation is best effort and cannot guarantee that billed work stops.
+
+## Roadmap
+
+A frozen labeled question set with independent answers; comparing deterministic,
+single-agent and multi-agent runs on quality, latency and token use; tool-call tracing.
+
+## License
+
+MIT. Cross-project context lives in the [portfolio guide](https://github.com/sachin2967/ml-portfolio).
