@@ -11,6 +11,10 @@ a seeded SQLite fixture. The model never supplies SQL or Python.
 
 > **Scope.** This is a prototype on a **synthetic** database. CI exercises the agent
 > workflow with a scripted model, so **live LLM answer quality has not been measured**.
+>
+> **Try it locally:** follow the [Quickstart](#quickstart) and inspect the
+> [dashboard preview](docs/images/synthetic-commerce-metrics.png). There is no hosted
+> endpoint or live-model quality result to claim at present.
 
 ![Streamlit commerce metrics grouped by category on the seeded database](docs/images/synthetic-commerce-metrics.png)
 
