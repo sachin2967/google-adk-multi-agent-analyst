@@ -32,14 +32,32 @@ a seeded SQLite fixture. The model never supplies SQL or Python.
 
 | Check | Result | What it shows |
 | --- | --- | --- |
-| Test suite | 32 passing; Ruff lint and format clean | ADK graph, API validation, metric semantics, parameter rejection, read-only SQLite, MCP stdio round trip, service limits |
+| Test suite | Ruff lint and format plus pytest | ADK graph, API validation, metric semantics, parameter rejection, read-only SQLite, MCP stdio round trip, service limits |
 | Tool regression (`scripts/run_benchmark.py`) | 4 of 4 pass | MCP aggregates match independently written SQL on the synthetic fixture |
-| Live LLM answer quality | **Not measured** | Needs a frozen labeled question set and a configured model |
+| Live LLM answer quality | **Not yet run live** | Provider evaluation is pending |
 
 The 4 cases are delivered revenue by category, order counts by status, overall average
 review and order counts by state. They validate the data tools, not natural-language
 understanding, and say nothing about production scale. See
 [docs/EVALUATION.md](docs/EVALUATION.md).
+
+### Frozen questions and offline preflight
+
+The [frozen set](data/analyst_questions_v1.json) contains 12 authored
+questions about the seeded synthetic database. Supported cases use separately
+authored SQL to compute the expected result. The deterministic contract receives
+oracle tool arguments and matched SQL on **8 of 8** supported cases.
+The unsupported questions are reserved for live refusal checks.
+
+Single-agent and multi-agent answer quality, latency, and token use are
+**not yet run live**. The offline preflight measures the tool contract.
+
+```bash
+python data/create_db.py
+python scripts/evaluate_live.py --split all --max-cases 12
+```
+
+See the [offline preflight report](evaluation/analyst_preflight.json).
 
 ## Architecture
 
@@ -131,7 +149,7 @@ loopback and add TLS, access control and gateway quotas before remote use. See
 | `streamlit_app/` | Dashboard that calls the API |
 | `data/create_db.py` | Seeded synthetic SQLite fixture (500 customers, 50 products, 1,200 orders) |
 | `scripts/run_benchmark.py` | Runs the tool regression |
-| `tests/` | 32 tests |
+| `tests/` | API, workflow, tool contract, and evaluation tests |
 | `docs/` | Architecture, evaluation, operations |
 
 ## Limitations
@@ -145,8 +163,9 @@ loopback and add TLS, access control and gateway quotas before remote use. See
 
 ## Roadmap
 
-A frozen labeled question set with independent answers; comparing deterministic,
-single-agent and multi-agent runs on quality, latency and token use; tool-call tracing.
+Run the frozen questions against a configured provider and compare single-agent
+and multi-agent quality, latency, and reported tokens. The question set and
+trace collection are in place.
 
 ## License
 

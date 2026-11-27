@@ -24,15 +24,18 @@ class AnalysisOutputError(RuntimeError):
     pass
 
 
-async def _run_agent(query: str) -> dict:
+async def _run_agent(
+    query: str, *, app=None, final_author="analytics_verifier", capture_trace=False
+) -> dict:
     from google.adk.agents.run_config import RunConfig
     from google.adk.runners import InMemoryRunner
     from google.genai import types
 
     from src.agents.adk_system import build_app
 
-    adk_app = build_app()
+    adk_app = app if app is not None else build_app()
     answers: list[str] = []
+    calls: list[dict] = []
     count = 0
     usage = {"prompt_tokens": 0, "candidate_tokens": 0, "thinking_tokens": 0}
     async with InMemoryRunner(app=adk_app) as runner:
@@ -59,7 +62,16 @@ async def _run_agent(query: str) -> dict:
                 ("thinking_tokens", "thoughts_token_count"),
             ):
                 usage[key] += int(getattr(metadata, attribute, 0) or 0)
-            if event.author == "analytics_verifier" and getattr(event, "content", None):
+            if capture_trace and getattr(event, "content", None):
+                for part in event.content.parts or []:
+                    call = getattr(part, "function_call", None)
+                    if call:
+                        calls.append({"name": call.name, "args": dict(call.args or {})})
+            if (
+                event.author == final_author
+                and event.is_final_response()
+                and getattr(event, "content", None)
+            ):
                 answers.extend(
                     part.text
                     for part in (event.content.parts or [])
@@ -70,7 +82,10 @@ async def _run_agent(query: str) -> dict:
     answer = "\n".join(answers).strip()
     if not answer:
         raise AnalysisOutputError("Verifier did not return a final answer.")
-    return {"answer": answer, "event_count": count, "reported_token_usage": usage}
+    result = {"answer": answer, "event_count": count, "reported_token_usage": usage}
+    if capture_trace:
+        result["tool_calls"] = calls
+    return result
 
 
 async def run_analysis(query: str) -> dict:

@@ -1,0 +1,106 @@
+{
+  "protocol": "analyst-questions-v1",
+  "questions_sha256": "6701f423c24f652bc510d8a5179980750bb35f19f15939ae30f1044ccb794217",
+  "database_sha256": "f393ab47482630e362067db2c1bfbef6d87ab22a7831c4a4bdec1239a4ba8e4c",
+  "live_provider_executed": false,
+  "model": null,
+  "split": "all",
+  "case_count": 12,
+  "results": [
+    {
+      "id": "dev-orders",
+      "strategy": "oracle_tool_contract",
+      "elapsed_ms": 1.2781730001734104,
+      "valid_json_object": true,
+      "allowlisted_calls_only": true,
+      "tool_intent_correct": true,
+      "structured_result_correct": true,
+      "unsupported_refusal_correct": null,
+      "passed": true
+    },
+    {
+      "id": "dev-revenue",
+      "strategy": "oracle_tool_contract",
+      "elapsed_ms": 2.4689290003152564,
+      "valid_json_object": true,
+      "allowlisted_calls_only": true,
+      "tool_intent_correct": true,
+      "structured_result_correct": true,
+      "unsupported_refusal_correct": null,
+      "passed": true
+    },
+    {
+      "id": "test-state",
+      "strategy": "oracle_tool_contract",
+      "elapsed_ms": 2.4203310003940715,
+      "valid_json_object": true,
+      "allowlisted_calls_only": true,
+      "tool_intent_correct": true,
+      "structured_result_correct": true,
+      "unsupported_refusal_correct": null,
+      "passed": true
+    },
+    {
+      "id": "test-filter",
+      "strategy": "oracle_tool_contract",
+      "elapsed_ms": 1.439347999621532,
+      "valid_json_object": true,
+      "allowlisted_calls_only": true,
+      "tool_intent_correct": true,
+      "structured_result_correct": true,
+      "unsupported_refusal_correct": null,
+      "passed": true
+    },
+    {
+      "id": "test-category",
+      "strategy": "oracle_tool_contract",
+      "elapsed_ms": 3.8695260000167764,
+      "valid_json_object": true,
+      "allowlisted_calls_only": true,
+      "tool_intent_correct": true,
+      "structured_result_correct": true,
+      "unsupported_refusal_correct": null,
+      "passed": true
+    },
+    {
+      "id": "test-review",
+      "strategy": "oracle_tool_contract",
+      "elapsed_ms": 1.6399999994973768,
+      "valid_json_object": true,
+      "allowlisted_calls_only": true,
+      "tool_intent_correct": true,
+      "structured_result_correct": true,
+      "unsupported_refusal_correct": null,
+      "passed": true
+    },
+    {
+      "id": "test-delivery",
+      "strategy": "oracle_tool_contract",
+      "elapsed_ms": 1.4396179994946579,
+      "valid_json_object": true,
+      "allowlisted_calls_only": true,
+      "tool_intent_correct": true,
+      "structured_result_correct": true,
+      "unsupported_refusal_correct": null,
+      "passed": true
+    },
+    {
+      "id": "test-empty",
+      "strategy": "oracle_tool_contract",
+      "elapsed_ms": 2.585303000159911,
+      "valid_json_object": true,
+      "allowlisted_calls_only": true,
+      "tool_intent_correct": true,
+      "structured_result_correct": true,
+      "unsupported_refusal_correct": null,
+      "passed": true
+    }
+  ],
+  "limitations": [
+    "Small authored synthetic benchmark; no independent human review or real business dataset.",
+    "Deterministic baseline receives oracle tool arguments; it is not a natural-language system.",
+    "Structured exact-result scoring does not judge prose usefulness or general safety.",
+    "One run per strategy/case; token usage is provider reported, no invented monetary cost.",
+    "8 LLM calls and 60 seconds per run; billed cancellation/retries are provider-dependent."
+  ]
+}
