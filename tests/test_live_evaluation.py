@@ -46,6 +46,10 @@ def test_order_counts_require_exact_values():
     assert not records_equal([{"value": 12.001}], [{"value": 12}])
 
 
+def test_out_of_range_result_does_not_crash_the_evaluator():
+    assert not records_equal([{"value": 10**400}], [{"value": 12.5}])
+
+
 def test_unsupported_requires_explicit_refusal_and_no_metric_call():
     result = {
         "answer": json.dumps({"supported": False, "reason": "Writes unavailable"}),
@@ -59,8 +63,14 @@ def test_unsupported_requires_explicit_refusal_and_no_metric_call():
     assert not score_response({"args": None}, wrong, None)["passed"]
 
 
+@pytest.mark.parametrize("reason", [" ", True, ["Writes unavailable"]])
+def test_unsupported_requires_a_nonblank_text_reason(reason):
+    answer = json.dumps({"supported": False, "reason": reason})
+    assert not score_response({"args": None}, {"answer": answer}, None)["passed"]
+
+
 @pytest.mark.parametrize("answer", ["not JSON", "[]", "null", "{}"])
 def test_invalid_answer_never_passes(answer):
-    assert not score_response(
-        {"args": None}, {"answer": answer, "tool_calls": []}, None
-    )["passed"]
+    score = score_response({"args": None}, {"answer": answer, "tool_calls": []}, None)
+    assert not score["passed"]
+    assert score["valid_json_object"] == (answer == "{}")

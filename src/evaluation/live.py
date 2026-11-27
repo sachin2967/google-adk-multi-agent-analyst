@@ -28,16 +28,19 @@ def records_equal(actual, expected) -> bool:
         for key, value in truth.items():
             found = row[key]
             if isinstance(value, (int, float)):
-                if (
-                    isinstance(found, bool)
-                    or not isinstance(found, (int, float))
-                    or not math.isfinite(found)
-                ):
+                if isinstance(found, bool) or not isinstance(found, (int, float)):
                     return False
-                if isinstance(value, int) and found != value:
-                    return False
-                if not math.isclose(found, value, rel_tol=1e-6, abs_tol=0.01):
-                    return False
+                if isinstance(value, int):
+                    if found != value:
+                        return False
+                else:
+                    try:
+                        if not math.isfinite(found) or not math.isclose(
+                            found, value, rel_tol=1e-6, abs_tol=0.01
+                        ):
+                            return False
+                    except OverflowError:
+                        return False
             elif found != value:
                 return False
     return True
@@ -55,7 +58,9 @@ def score_response(case: dict, result: dict, expected: list | None) -> dict:
         if not isinstance(answer, dict):
             raise TypeError("Object required")
     except (ValueError, KeyError, TypeError):
-        answer = {}
+        answer = None
+    valid_json_object = answer is not None
+    answer = answer or {}
     supported = case["args"] is not None
     if supported:
         truth_args = {**DEFAULT_ARGS, **case["args"]}
@@ -71,13 +76,15 @@ def score_response(case: dict, result: dict, expected: list | None) -> dict:
         refusal = None
     else:
         intent, numeric = not metric_calls, None
+        reason = answer.get("reason")
         refusal = (
             answer.get("supported") is False
-            and bool(answer.get("reason"))
+            and isinstance(reason, str)
+            and bool(reason.strip())
             and not metric_calls
         )
     return {
-        "valid_json_object": bool(answer),
+        "valid_json_object": valid_json_object,
         "allowlisted_calls_only": allowed,
         "tool_intent_correct": intent,
         "structured_result_correct": numeric,
